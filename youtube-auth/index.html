@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Chat MultiStream — YouTube</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color-scheme: dark;
+      background: #111318;
+      color: #f2f4f8;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    main {
+      width: min(520px, 100%);
+      background: #1b1f27;
+      border: 1px solid #303641;
+      border-radius: 18px;
+      padding: 28px;
+      box-sizing: border-box;
+      box-shadow: 0 18px 50px rgba(0,0,0,.35);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 1.55rem;
+    }
+    p {
+      line-height: 1.5;
+      color: #c7ccd6;
+    }
+    button {
+      width: 100%;
+      margin-top: 14px;
+      border: 0;
+      border-radius: 12px;
+      padding: 14px 16px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      background: #ff0033;
+      color: white;
+    }
+    button:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+    #returnButton {
+      display: none;
+      background: #3f7cff;
+    }
+    .small {
+      margin-top: 18px;
+      font-size: .86rem;
+      color: #8f98a8;
+    }
+  </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <main>
+    <h1>Conectar YouTube</h1>
+    <p id="status">Preparando a autorização…</p>
+    <button id="authorizeButton" type="button" disabled>Escolher canal do YouTube</button>
+    <button id="returnButton" type="button">Voltar ao Chat MultiStream</button>
+    <p class="small">
+      Esta página solicita somente acesso de leitura ao YouTube. Nenhuma senha do Google passa pelo Chat MultiStream.
+    </p>
+  </main>
+
+  <script>
+    (() => {
+      const params = new URLSearchParams(window.location.search);
+      const clientId = (params.get("client_id") || "").trim();
+      const state = (params.get("state") || "").trim();
+
+      const status = document.getElementById("status");
+      const authorizeButton = document.getElementById("authorizeButton");
+      const returnButton = document.getElementById("returnButton");
+
+      let tokenClient = null;
+      let returnPayload = null;
+
+      const setError = (message) => {
+        status.textContent = message;
+        authorizeButton.disabled = false;
+      };
+
+      const buildIntentUrl = (payload) => {
+        const encode = (value) => encodeURIComponent(String(value));
+        const parts = [
+          "intent://youtube-oauth/callback#Intent",
+          "scheme=chatmultistream",
+          "package=com.elexbr.chatmultistream",
+          "S.state=" + encode(state)
+        ];
+
+        if (payload.accessToken) {
+          parts.push("S.access_token=" + encode(payload.accessToken));
+          parts.push("i.expires_in=" + Math.max(1, Math.floor(payload.expiresIn || 3600)));
+        }
+
+        if (payload.error) {
+          parts.push("S.error=" + encode(payload.error));
+        }
+
+        parts.push("end");
+        return parts.join(";");
+      };
+
+      const showReturn = (payload, message) => {
+        returnPayload = payload;
+        status.textContent = message;
+        authorizeButton.style.display = "none";
+        returnButton.style.display = "block";
+      };
+
+      const initialize = () => {
+        if (!clientId) {
+          setError("O app não enviou o Client ID Web do Google.");
+          return;
+        }
+
+        if (!state) {
+          setError("A solicitação não contém um estado de segurança válido.");
+          return;
+        }
+
+        if (!window.google || !google.accounts || !google.accounts.oauth2) {
+          window.setTimeout(initialize, 150);
+          return;
+        }
+
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "https://www.googleapis.com/auth/youtube.readonly",
+          include_granted_scopes: false,
+          prompt: "select_account",
+          callback: (response) => {
+            if (response.error) {
+              showReturn(
+                { error: response.error_description || response.error },
+                "O Google não concluiu a autorização."
+              );
+              return;
+            }
+
+            if (!response.access_token) {
+              showReturn(
+                { error: "Autorização concluída sem access token." },
+                "O Google não retornou um token de acesso."
+              );
+              return;
+            }
+
+            showReturn(
+              {
+                accessToken: response.access_token,
+                expiresIn: Number(response.expires_in) || 3600
+              },
+              "Autorização concluída. Toque abaixo para voltar ao Chat MultiStream."
+            );
+          },
+          error_callback: (error) => {
+            showReturn(
+              { error: error && error.type ? error.type : "Falha no fluxo OAuth." },
+              "Não foi possível concluir a janela de autorização."
+            );
+          }
+        });
+
+        authorizeButton.disabled = false;
+        status.textContent = "Escolha a Conta Google e, em seguida, o canal do YouTube que o Chat MultiStream deve usar.";
+      };
+
+      authorizeButton.addEventListener("click", () => {
+        if (!tokenClient) {
+          setError("A autorização do Google ainda não está pronta.");
+          return;
+        }
+
+        authorizeButton.disabled = true;
+        status.textContent = "Aguardando o Google…";
+
+        tokenClient.requestAccessToken({
+          prompt: "select_account",
+          include_granted_scopes: false
+        });
+
+        window.setTimeout(() => {
+          if (!returnPayload) {
+            authorizeButton.disabled = false;
+          }
+        }, 1200);
+      });
+
+      returnButton.addEventListener("click", () => {
+        if (!returnPayload) {
+          return;
+        }
+
+        window.location.href = buildIntentUrl(returnPayload);
+      });
+
+      initialize();
+    })();
+  </script>
+</body>
+</html>
